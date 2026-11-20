@@ -96,6 +96,7 @@ void ReplaySystem::onLevelEnter(PlayLayer* pl) {
 	m_actionIndex = 0;
 	m_checkpointFrames.clear();
 	m_haveLastCheckpoint = false;
+	m_checkpointCount = 0;
 	m_lastCheckpointFrame = 0;
 	m_inLevel = true;
 	applyTimeScale();
@@ -106,6 +107,7 @@ void ReplaySystem::onLevelExit() {
 	m_frame = 0;
 	m_checkpointFrames.clear();
 	m_haveLastCheckpoint = false;
+	m_checkpointCount = 0;
 	m_lastCheckpointFrame = 0;
 	m_inLevel = false;
 	stop();
@@ -137,12 +139,20 @@ void ReplaySystem::onCheckpointRemoved(PlayLayer* pl) {
 void ReplaySystem::onAllCheckpointsRemoved() {
 	m_checkpointFrames.clear();
 	m_haveLastCheckpoint = false;
+	m_checkpointCount = 0;
 	m_lastCheckpointFrame = 0;
 	m_lastCheckpointActions = 0;
 }
 
 void ReplaySystem::trackCheckpoint(PlayLayer* pl) {
-	if (!pl->m_checkpointArray || pl->m_checkpointArray->count() == 0) return;
+	const size_t count = pl->m_checkpointArray ? pl->m_checkpointArray->count() : 0;
+	if (count < m_checkpointCount) {
+		m_checkpointCount = count;
+		onCheckpointRemoved(pl);
+		return;
+	}
+	m_checkpointCount = count;
+	if (count == 0) return;
 	auto* obj = pl->m_checkpointArray->lastObject();
 	if (m_checkpointFrames.try_emplace(obj, CheckpointSnap{m_frame, replay.actions().size()}).second) {
 		m_lastCheckpointFrame = m_frame;

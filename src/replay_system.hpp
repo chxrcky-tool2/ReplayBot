@@ -22,6 +22,7 @@ class ReplaySystem {
 	struct CheckpointSnap { uint32_t frame = 0; size_t actions = 0; };
 	std::unordered_map<cocos2d::CCObject*, CheckpointSnap> m_checkpointFrames;
 	size_t m_lastCheckpointActions = 0;
+	size_t m_checkpointCount = 0;
 
 	ReplaySystem() = default;
 
