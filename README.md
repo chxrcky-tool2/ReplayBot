@@ -10,3 +10,6 @@ Demo Video:
 - (?) make it more consistent
 - rob uses a time function somewhere in the physics (why)
 - wasureta replay in `replays/` can randomly die at 26%, maybe the x pos gets unaligned? (i blame robtop)
+
+
+Credits to MatCool, because he's cool 😎 
