@@ -1,10 +1,32 @@
 #include "replay_system.hpp"
 
 #include <algorithm>
+#include <type_traits>
 
 using namespace geode::prelude;
 
 constexpr const char* kStatusLabelID = "replaybot-status";
+
+namespace {
+	template <class P>
+	std::filesystem::path toStdPath(const P& p) {
+		if constexpr (std::is_convertible_v<const P&, std::filesystem::path>) {
+			return p;
+		} else if constexpr (requires { p.string(); }) {
+			return std::filesystem::path(std::string(p.string()));
+		} else if constexpr (requires { p.str(); }) {
+			return std::filesystem::path(std::string(p.str()));
+		} else if constexpr (requires { p.toString(); }) {
+			return std::filesystem::path(std::string(p.toString()));
+		} else if constexpr (requires { p.c_str(); }) {
+			return std::filesystem::path(std::string(p.c_str()));
+		} else if constexpr (requires { fmt::format("{}", p); }) {
+			return std::filesystem::path(fmt::format("{}", p));
+		} else {
+			static_assert(sizeof(P) == 0, "cannot convert the save dir to std::filesystem::path");
+		}
+	}
+}
 
 
 void ReplaySystem::setState(RBState state) {
@@ -209,7 +231,8 @@ void ReplaySystem::saveSettings() {
 
 
 std::filesystem::path ReplaySystem::replayDir() {
-	auto dir = Mod::get()->getSaveDir() / "replays";
+	std::filesystem::path dir = toStdPath(Mod::get()->getSaveDir());
+	dir /= "replays";
 	std::error_code ec;
 	std::filesystem::create_directories(dir, ec);
 	return dir;
