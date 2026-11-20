@@ -5,6 +5,17 @@
 
 using namespace geode::prelude;
 
+namespace {
+	template <class Dispatcher, class Target>
+	void forcePrio(Dispatcher* dispatcher, Target* target) {
+		if constexpr (requires { dispatcher->registerForcePrio(target, 2); }) {
+			dispatcher->registerForcePrio(target, 2);
+		} else {
+			dispatcher->registerForcePrio(target, 2, 0);
+		}
+	}
+}
+
 RBMenu* RBMenu::create() {
 	auto ret = new RBMenu();
 	if (ret && ret->init()) {
@@ -39,7 +50,7 @@ bool RBMenu::init() {
 	m_mainLayer->addChild(m_buttonMenu);
 
 	this->registerWithTouchDispatcher();
-	CCTouchDispatcher::get()->registerForcePrio(this, 2);
+	forcePrio(CCTouchDispatcher::get(), this);
 
 	auto label = [&](const char* text, CCPoint pos, float scale, CCPoint anchor = {0.5f, 0.5f}, const char* font = "bigFont.fnt") {
 		auto l = CCLabelBMFont::create(text, font);

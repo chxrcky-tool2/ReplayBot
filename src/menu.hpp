@@ -10,7 +10,7 @@ protected:
 	ButtonSprite* m_recordSprite = nullptr;
 	ButtonSprite* m_playSprite = nullptr;
 
-	bool init();
+	bool init() override;
 	void refresh();
 	void keyBackClicked() override;
 

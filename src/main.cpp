@@ -18,15 +18,15 @@ static bool isThePlayLayer(GJBaseGameLayer* layer) {
 }
 
 class $modify(RBBaseGameLayer, GJBaseGameLayer) {
-	void processCommands(float dt) {
+	void processCommands(float dt, bool isHalfTick, bool isLastTick) {
 		auto pl = PlayLayer::get();
 		if (!isThePlayLayer(this)) {
-			GJBaseGameLayer::processCommands(dt);
+			GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
 			return;
 		}
 		auto& rs = ReplaySystem::get();
 		rs.beforeStep(pl);
-		GJBaseGameLayer::processCommands(dt);
+		GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
 		rs.afterStep();
 	}
 
