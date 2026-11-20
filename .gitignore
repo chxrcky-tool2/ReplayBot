@@ -1,9 +1,4 @@
 build/
-ffmpeg/
-inject.py
-Debug/
-Release/
-.vs/
-.vscode/
-injector.exe
-src/version.hpp
+build-*/
+.cache/
+*.geode

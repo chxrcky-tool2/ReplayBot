@@ -1,0 +1,15 @@
+{
+	"geode": "6.0.0-alpha.2",
+	"gd": {
+		"win": "*",
+		"android": "*",
+		"mac": "*",
+		"ios": "*"
+	},
+	"version": "v1.0.0",
+	"id": "MatCool.replaybot",
+	"name": "ReplayBot",
+	"developer": "MatCool, ChxrCky",
+	"description": "Record and replay your inputs (port of matcool's ReplayBot).",
+	"tags": ["utility", "gameplay"]
+}
