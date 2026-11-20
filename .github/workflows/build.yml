@@ -16,3 +16,9 @@ jobs:
         with:
           sdk: v6.0.0-alpha.2
           target: Android64
+      - name: Upload .geode
+        uses: actions/upload-artifact@v4
+        with:
+          name: ReplayBot-Android64
+          path: "**/*.geode"
+          if-no-files-found: error
