@@ -29,9 +29,9 @@ namespace {
 }
 
 
-void ReplaySystem::setState(RBState state) {
+void ReplaySystem::applyTimeScale() {
 	auto* scheduler = CCDirector::sharedDirector()->getScheduler();
-	const bool wantScale = state == RBState::Recording && speed != 1.f;
+	const bool wantScale = speedhack && m_inLevel;
 	if (wantScale) {
 		if (!m_scaleApplied) {
 			m_prevTimeScale = scheduler->getTimeScale();
@@ -42,7 +42,11 @@ void ReplaySystem::setState(RBState state) {
 		scheduler->setTimeScale(m_prevTimeScale);
 		m_scaleApplied = false;
 	}
+}
+
+void ReplaySystem::setState(RBState state) {
 	m_state = state;
+	applyTimeScale();
 	refreshLabel();
 }
 
@@ -72,7 +76,12 @@ void ReplaySystem::stop() {
 
 void ReplaySystem::setSpeed(float value) {
 	speed = value;
-	if (isRecording()) setState(RBState::Recording);
+	applyTimeScale();
+}
+
+void ReplaySystem::setSpeedhack(bool on) {
+	speedhack = on;
+	applyTimeScale();
 }
 
 bool ReplaySystem::consumeRestartOnResume() {
@@ -86,25 +95,71 @@ void ReplaySystem::onLevelEnter(PlayLayer* pl) {
 	m_frame = 0;
 	m_actionIndex = 0;
 	m_checkpointFrames.clear();
+	m_haveLastCheckpoint = false;
+	m_lastCheckpointFrame = 0;
+	m_inLevel = true;
+	applyTimeScale();
 	refreshLabel();
 }
 
 void ReplaySystem::onLevelExit() {
 	m_frame = 0;
 	m_checkpointFrames.clear();
+	m_haveLastCheckpoint = false;
+	m_lastCheckpointFrame = 0;
+	m_inLevel = false;
 	stop();
 }
 
 void ReplaySystem::onCheckpoint(PlayLayer* pl) {
-	if (pl->m_checkpointArray && pl->m_checkpointArray->count() > 0)
-		m_checkpointFrames[pl->m_checkpointArray->lastObject()] = m_frame;
+	if (pl->m_checkpointArray && pl->m_checkpointArray->count() > 0) {
+		auto* obj = pl->m_checkpointArray->lastObject();
+		m_checkpointFrames[obj] = {m_frame, replay.actions().size()};
+		m_lastCheckpointFrame = m_frame;
+		m_lastCheckpointActions = replay.actions().size();
+		m_haveLastCheckpoint = true;
+	}
+}
+
+void ReplaySystem::onCheckpointRemoved(PlayLayer* pl) {
+	if (!isRecording()) return;
+	auto& acts = replay.actions();
+	size_t keep = 0;
+	if (pl->m_checkpointArray && pl->m_checkpointArray->count() > 0) {
+		auto it = m_checkpointFrames.find(pl->m_checkpointArray->lastObject());
+		if (it != m_checkpointFrames.end()) keep = it->second.actions;
+		else keep = m_haveLastCheckpoint ? m_lastCheckpointActions : acts.size();
+	}
+	if (keep < acts.size()) acts.resize(keep);
+	refreshLabel();
+}
+
+void ReplaySystem::onAllCheckpointsRemoved() {
+	m_checkpointFrames.clear();
+	m_haveLastCheckpoint = false;
+	m_lastCheckpointFrame = 0;
+	m_lastCheckpointActions = 0;
+}
+
+void ReplaySystem::trackCheckpoint(PlayLayer* pl) {
+	if (!pl->m_checkpointArray || pl->m_checkpointArray->count() == 0) return;
+	auto* obj = pl->m_checkpointArray->lastObject();
+	if (m_checkpointFrames.try_emplace(obj, CheckpointSnap{m_frame, replay.actions().size()}).second) {
+		m_lastCheckpointFrame = m_frame;
+		m_lastCheckpointActions = replay.actions().size();
+		m_haveLastCheckpoint = true;
+	}
 }
 
 void ReplaySystem::onReset(PlayLayer* pl) {
+	m_inLevel = true;
+	applyTimeScale();
+
 	uint32_t checkpointFrame = 0;
 	if (pl->m_checkpointArray && pl->m_checkpointArray->count() > 0) {
 		auto it = m_checkpointFrames.find(pl->m_checkpointArray->lastObject());
-		if (it != m_checkpointFrames.end()) checkpointFrame = it->second;
+		if (it != m_checkpointFrames.end()) checkpointFrame = it->second.frame;
+		else if (m_haveLastCheckpoint) checkpointFrame = m_lastCheckpointFrame;
 	}
 	m_frame = checkpointFrame;
 	const float px = pl->m_player1->getPositionX();
@@ -142,6 +197,7 @@ void ReplaySystem::onReset(PlayLayer* pl) {
 }
 
 void ReplaySystem::beforeStep(PlayLayer* pl) {
+	trackCheckpoint(pl);
 	if (!isPlaying() || !pl->m_player1) return;
 
 	auto& acts = replay.actions();
@@ -220,6 +276,7 @@ void ReplaySystem::loadSettings() {
 	defaultType = mod->getSavedValue<bool>("frame-mode", true) ? ReplayType::Frame : ReplayType::XPos;
 	showStatus = mod->getSavedValue<bool>("show-status", true);
 	speed = mod->getSavedValue<float>("speed", 1.f);
+	speedhack = mod->getSavedValue<bool>("speedhack", false);
 }
 
 void ReplaySystem::saveSettings() {
@@ -227,6 +284,7 @@ void ReplaySystem::saveSettings() {
 	mod->setSavedValue<bool>("frame-mode", defaultType == ReplayType::Frame);
 	mod->setSavedValue<bool>("show-status", showStatus);
 	mod->setSavedValue<float>("speed", speed);
+	mod->setSavedValue<bool>("speedhack", speedhack);
 }
 
 

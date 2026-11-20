@@ -41,8 +41,8 @@ bool RBMenu::init() {
 	this->addChild(m_mainLayer);
 
 	auto bg = extension::CCScale9Sprite::create("GJ_square01.png", {0.f, 0.f, 80.f, 80.f});
-	bg->setContentSize({380.f, 250.f});
-	bg->setPosition(c);
+	bg->setContentSize({380.f, 280.f});
+	bg->setPosition({c.x, c.y - 15.f});
 	m_mainLayer->addChild(bg, -1);
 
 	m_buttonMenu = CCMenu::create();
@@ -120,12 +120,18 @@ bool RBMenu::init() {
 	m_buttonMenu->addChild(statusToggle);
 	label("Status text", {left + 168.f, top - 215.f}, 0.4f, {0.f, 0.5f});
 
-	label("Speed", {left + 262.f, top - 215.f}, 0.4f, {0.f, 0.5f});
+	auto speedToggle = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(RBMenu::onSpeedhack), 0.55f);
+	speedToggle->setPosition({left + 12.f, top - 245.f});
+	speedToggle->toggle(rs.speedhack);
+	m_buttonMenu->addChild(speedToggle);
+	label("Speedhack", {left + 30.f, top - 245.f}, 0.4f, {0.f, 0.5f});
+
+	label("Speed", {left + 150.f, top - 245.f}, 0.4f, {0.f, 0.5f});
 	m_speedInput = TextInput::create(50.f, "1", "bigFont.fnt");
 	m_speedInput->setFilter("0123456789.");
 	m_speedInput->setMaxCharCount(5);
 	m_speedInput->setString(fmt::format("{}", rs.speed));
-	m_speedInput->setPosition({left + 332.f, top - 215.f});
+	m_speedInput->setPosition({left + 225.f, top - 245.f});
 	m_speedInput->setCallback([](std::string const& text) {
 		char* end = nullptr;
 		const float v = std::strtof(text.c_str(), &end);
@@ -244,6 +250,12 @@ void RBMenu::onStatusText(CCObject* sender) {
 	ReplaySystem::get().showStatus = on;
 	ReplaySystem::get().saveSettings();
 	ReplaySystem::get().refreshLabel();
+}
+
+void RBMenu::onSpeedhack(CCObject* sender) {
+	auto on = !static_cast<CCMenuItemToggler*>(sender)->isToggled();
+	ReplaySystem::get().setSpeedhack(on);
+	ReplaySystem::get().saveSettings();
 }
 
 void RBMenu::onPathInfo(CCObject*) {

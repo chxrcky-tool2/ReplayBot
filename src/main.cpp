@@ -58,6 +58,16 @@ class $modify(RBPlayLayer, PlayLayer) {
 		ReplaySystem::get().onCheckpoint(this);
 	}
 
+	void removeLastCheckpoint() {
+		PlayLayer::removeLastCheckpoint();
+		ReplaySystem::get().onCheckpointRemoved(this);
+	}
+
+	void removeAllCheckpoints() {
+		PlayLayer::removeAllCheckpoints();
+		ReplaySystem::get().onAllCheckpointsRemoved();
+	}
+
 	void levelComplete() {
 		ReplaySystem::get().onLevelExit();
 		PlayLayer::levelComplete();

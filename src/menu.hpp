@@ -21,6 +21,7 @@ protected:
 	void onLoad(cocos2d::CCObject*);
 	void onFrameMode(cocos2d::CCObject*);
 	void onStatusText(cocos2d::CCObject*);
+	void onSpeedhack(cocos2d::CCObject*);
 	void onPathInfo(cocos2d::CCObject*);
 
 public:
