@@ -1,39 +1,39 @@
 #pragma once
+#include <cstdint>
+#include <filesystem>
+#include <optional>
 #include <vector>
-#include <string>
-#include <iostream>
 
-enum ReplayType : std::uint8_t {
-    XPOS,
-    FRAME
-};
+enum class ReplayType : uint8_t { XPos = 0, Frame = 1 };
 
 struct Action {
-    union {
-	    float x;
-        unsigned frame;
-    };
-	bool hold;
-	bool player2;
+	union {
+		float x;
+		uint32_t frame;
+	};
+	bool hold = false;
+	bool player2 = false;
+
+	Action() : frame(0) {}
 };
 
 class Replay {
-protected:
-    std::vector<Action> actions;
-    float fps;
-    ReplayType type;
+	std::vector<Action> m_actions;
+	float m_tps;
+	ReplayType m_type;
+
 public:
-    Replay(float fps, ReplayType type = ReplayType::FRAME) : fps(fps), type(type) {}
+	explicit Replay(float tps = 240.f, ReplayType type = ReplayType::Frame) : m_tps(tps), m_type(type) {}
 
-    float get_fps() { return fps; }
-    
-    void add_action(const Action& action) { actions.push_back(action); }
-    auto& get_actions() { return actions; }
-    void remove_actions_after(float x);
-    void remove_actions_after(unsigned frame);
+	float tps() const { return m_tps; }
+	ReplayType type() const { return m_type; }
+	std::vector<Action>& actions() { return m_actions; }
+	const std::vector<Action>& actions() const { return m_actions; }
 
-    auto get_type() { return type; }
+	void add(const Action& action) { m_actions.push_back(action); }
+	void removeAfterX(float x);
+	void removeAfterFrame(uint32_t frame);
 
-    void save(const std::string& path);
-    static Replay load(const std::string& path);
+	bool save(const std::filesystem::path& path) const;
+	static std::optional<Replay> load(const std::filesystem::path& path);
 };

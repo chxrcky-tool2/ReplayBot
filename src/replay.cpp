@@ -1,114 +1,95 @@
 #include "replay.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <fstream>
-#include "utils.hpp"
 
-void Replay::remove_actions_after(float x) {
-	const auto check = [&](const Action& action) -> bool {
-		return action.x >= x;
-	};
-	actions.erase(std::remove_if(actions.begin(), actions.end(), check), actions.end());
-}
+namespace {
+	constexpr uint8_t kFormatVersion = 2;
+	constexpr char kMagic[4] = {'R', 'P', 'L', 'Y'};
 
-void Replay::remove_actions_after(unsigned frame) {
-	const auto check = [&](const Action& action) -> bool {
-		return action.frame >= frame;
-	};
-	actions.erase(std::remove_if(actions.begin(), actions.end(), check), actions.end());
-}
-
-// these two functions are so stupid
-// why cant c++ do it for me :(
-
-template <typename T>
-inline void bin_write(std::ofstream& stream, T value) {
-	stream.write(cast<char*>(&value), sizeof(T));
-}
-
-template <typename T>
-inline T bin_read(std::ifstream& stream) {
-	T value;
-	stream.read(cast<char*>(&value), sizeof(T));
-	return value;
-}
-
-/*
- * Format changelog
- *
- * - version 1
- * header | action[]
- * header: "RPLY" | version as u8 | fps as f32
- * action: x as f32 | state as u8
- * 
- * - version 2
- * add `type as u8` between version and fps
- * change action x to be either float or an unsigned int
- */
-
-constexpr uint8_t format_ver = 2;
-constexpr const char* format_magic = "RPLY";
-
-void Replay::save(const std::string& path) {
-	std::ofstream file;
-	file.open(widen(path), std::ios::binary | std::ios::out);
-	file << format_magic << format_ver << type;
-	bin_write(file, fps);
-	for (const auto& action : actions) {
-		uint8_t state = static_cast<uint8_t>(action.hold) | static_cast<uint8_t>(action.player2) << 1;
-		if (type == ReplayType::XPOS)
-			bin_write(file, action.x);
-		else if (type == ReplayType::FRAME)
-			bin_write(file, action.frame);
-		file << state;
+	template <class T>
+	void writeBin(std::ofstream& f, T v) {
+		f.write(reinterpret_cast<const char*>(&v), sizeof(T));
 	}
-	file.close();
+
+	template <class T>
+	bool readBin(std::ifstream& f, T& v) {
+		f.read(reinterpret_cast<char*>(&v), sizeof(T));
+		return static_cast<bool>(f);
+	}
 }
 
-Replay Replay::load(const std::string& path)  {
-	Replay replay(0, ReplayType::XPOS);
-	std::ifstream file;
-	file.open(widen(path), std::ios::binary | std::ios::in);
+void Replay::removeAfterX(float x) {
+	std::erase_if(m_actions, [&](const Action& a) { return a.x >= x; });
+}
 
-	file.seekg(0, std::ios::end);
-	size_t file_size = static_cast<size_t>(file.tellg());
-	file.seekg(0);
+void Replay::removeAfterFrame(uint32_t frame) {
+	std::erase_if(m_actions, [&](const Action& a) { return a.frame >= frame; });
+}
+
+bool Replay::save(const std::filesystem::path& path) const {
+	std::ofstream f(path, std::ios::binary | std::ios::out | std::ios::trunc);
+	if (!f) return false;
+
+	f.write(kMagic, 4);
+	writeBin<uint8_t>(f, kFormatVersion);
+	writeBin<uint8_t>(f, static_cast<uint8_t>(m_type));
+	writeBin<float>(f, m_tps);
+	for (const auto& a : m_actions) {
+		if (m_type == ReplayType::XPos) writeBin<float>(f, a.x);
+		else writeBin<uint32_t>(f, a.frame);
+		writeBin<uint8_t>(f, static_cast<uint8_t>((a.hold ? 1 : 0) | (a.player2 ? 2 : 0)));
+	}
+	return static_cast<bool>(f);
+}
+
+std::optional<Replay> Replay::load(const std::filesystem::path& path) {
+	std::ifstream f(path, std::ios::binary | std::ios::in);
+	if (!f) return std::nullopt;
 
 	char magic[4];
-	file.read(magic, 4);
-	if (memcmp(magic, format_magic, 4) == 0) {
-		auto ver = bin_read<uint8_t>(file);
-		if (ver == 1 || ver == 2) {
-			if (ver == 2) replay.type = ReplayType(bin_read<uint8_t>(file));
-			replay.fps = bin_read<float>(file);
-			size_t left = file_size - static_cast<size_t>(file.tellg());
-			float x;
-			unsigned frame;
-			for (size_t _ = 0; _ < left / 5; ++_) {
-				if (replay.type == ReplayType::XPOS)
-					x = bin_read<float>(file);
-				else if (replay.type == ReplayType::FRAME)
-					frame = bin_read<unsigned>(file);
-				auto state = bin_read<uint8_t>(file);
-				bool hold = state & 1;
-				bool player2 = state & 2;
-				Action action = { 0, hold, player2 };
-				if (replay.type == ReplayType::XPOS)
-					action.x = x;
-				else if (replay.type == ReplayType::FRAME)
-					action.frame = frame;
-				replay.add_action(action);
+	f.read(magic, 4);
+	if (!f) return std::nullopt;
+
+	Replay r(0.f, ReplayType::XPos);
+
+	if (std::memcmp(magic, kMagic, 4) == 0) {
+		uint8_t ver = 0;
+		if (!readBin(f, ver) || (ver != 1 && ver != 2)) return std::nullopt;
+		if (ver == 2) {
+			uint8_t t = 0;
+			if (!readBin(f, t) || t > 1) return std::nullopt;
+			r.m_type = static_cast<ReplayType>(t);
+		}
+		if (!readBin(f, r.m_tps)) return std::nullopt;
+
+		while (true) {
+			Action a;
+			if (r.m_type == ReplayType::XPos) {
+				if (!readBin(f, a.x)) break;
+			} else {
+				if (!readBin(f, a.frame)) break;
 			}
+			uint8_t state = 0;
+			if (!readBin(f, state)) break;
+			a.hold = state & 1;
+			a.player2 = state & 2;
+			r.add(a);
 		}
 	} else {
-		replay.fps = *cast<float*>(&magic);
-		size_t left = file_size - static_cast<size_t>(file.tellg());
-		for (size_t _ = 0; _ < left / 6; ++_) {
-			float x = bin_read<float>(file);
-			bool hold = bin_read<bool>(file);
-			bool player2 = bin_read<bool>(file);
-			replay.add_action({ x, hold, player2 });
+		std::memcpy(&r.m_tps, magic, 4);
+		while (true) {
+			Action a;
+			uint8_t hold = 0, p2 = 0;
+			if (!readBin(f, a.x) || !readBin(f, hold) || !readBin(f, p2)) break;
+			a.hold = hold != 0;
+			a.player2 = p2 != 0;
+			r.add(a);
 		}
 	}
-	file.close();
 
-	return std::move(replay);
+	if (!std::isfinite(r.m_tps) || r.m_tps <= 0.f) return std::nullopt;
+	return r;
 }
