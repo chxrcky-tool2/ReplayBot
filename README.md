@@ -1,5 +1,7 @@
 # ReplayBot
 
+ported to Android64 and 32 gd 2.209 and geode v6.0.0 alpha 2
+
 A replay bot for Geometry Dash
 
 Demo Video:
