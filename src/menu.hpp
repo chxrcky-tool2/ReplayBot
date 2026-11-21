@@ -1,5 +1,8 @@
 #pragma once
 #include <Geode/Geode.hpp>
+#include <functional>
+#include <string>
+#include <vector>
 
 class RBMenu : public FLAlertLayer {
 protected:
@@ -23,8 +26,33 @@ protected:
 	void onStatusText(cocos2d::CCObject*);
 	void onSpeedhack(cocos2d::CCObject*);
 	void onPathInfo(cocos2d::CCObject*);
+	void onClear(cocos2d::CCObject*);
+	void onNoclip(cocos2d::CCObject*);
+	void onInputFixes(cocos2d::CCObject*);
+	void loadByName(std::string const& name);
 
 public:
 	static RBMenu* create();
 	static void open();
+};
+
+class RBLoadMenu : public FLAlertLayer {
+protected:
+	std::vector<std::string> m_names;
+	std::function<void(std::string const&)> m_onPick;
+	size_t m_page = 0;
+	cocos2d::CCMenu* m_listMenu = nullptr;
+	cocos2d::CCLabelBMFont* m_pageLabel = nullptr;
+
+	bool init(std::vector<std::string> names, std::function<void(std::string const&)> onPick);
+	void rebuild();
+	void keyBackClicked() override;
+
+	void onClose(cocos2d::CCObject*);
+	void onPick(cocos2d::CCObject*);
+	void onPrev(cocos2d::CCObject*);
+	void onNext(cocos2d::CCObject*);
+
+public:
+	static RBLoadMenu* create(std::vector<std::string> names, std::function<void(std::string const&)> onPick);
 };

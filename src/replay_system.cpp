@@ -1,6 +1,7 @@
 #include "replay_system.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <type_traits>
 
 using namespace geode::prelude;
@@ -29,24 +30,43 @@ namespace {
 }
 
 
-void ReplaySystem::applyTimeScale() {
-	auto* scheduler = CCDirector::sharedDirector()->getScheduler();
-	const bool wantScale = speedhack && m_inLevel;
-	if (wantScale) {
-		if (!m_scaleApplied) {
-			m_prevTimeScale = scheduler->getTimeScale();
-			m_scaleApplied = true;
-		}
-		scheduler->setTimeScale(speed);
-	} else if (m_scaleApplied) {
-		scheduler->setTimeScale(m_prevTimeScale);
-		m_scaleApplied = false;
-	}
+float ReplaySystem::effectiveSpeed() const {
+	if (!speedhack || !m_inLevel) return 1.f;
+	if (!std::isfinite(speed)) return 1.f;
+	return std::clamp(speed, 0.01f, 20.f);
+}
+
+void ReplaySystem::applyAudioSpeed() {
+	auto* engine = FMODAudioEngine::sharedEngine();
+	if (!engine) return;
+	auto* channel = engine->m_backgroundMusicChannel;
+	if (!channel) return;
+	channel->setPitch(effectiveSpeed());
+}
+
+bool ReplaySystem::blocksInput(bool down) const {
+	if (!inputFixesEnabled) return false;
+	if (isPlaying()) return true;
+	if (m_dead) return true;
+	if (down && m_frame < m_resetFrame + 2) return true;
+	return false;
+}
+
+void ReplaySystem::tickAudio() {
+	if ((++m_audioTick % 30) == 0) applyAudioSpeed();
+}
+
+void ReplaySystem::clearReplay() {
+	if (isPlaying()) stop();
+	replay = Replay(kTps, isRecording() ? replay.type() : defaultType);
+	m_actionIndex = 0;
+	for (auto& snap : m_checkpointStack) snap.actions = 0;
+	refreshLabel();
 }
 
 void ReplaySystem::setState(RBState state) {
 	m_state = state;
-	applyTimeScale();
+	applyAudioSpeed();
 	refreshLabel();
 }
 
@@ -76,12 +96,12 @@ void ReplaySystem::stop() {
 
 void ReplaySystem::setSpeed(float value) {
 	speed = value;
-	applyTimeScale();
+	applyAudioSpeed();
 }
 
 void ReplaySystem::setSpeedhack(bool on) {
 	speedhack = on;
-	applyTimeScale();
+	applyAudioSpeed();
 }
 
 bool ReplaySystem::consumeRestartOnResume() {
@@ -90,88 +110,65 @@ bool ReplaySystem::consumeRestartOnResume() {
 	return v;
 }
 
+void ReplaySystem::clearCheckpoints() {
+	m_checkpointStack.clear();
+}
 
 void ReplaySystem::onLevelEnter(PlayLayer* pl) {
 	m_frame = 0;
 	m_actionIndex = 0;
-	m_checkpointFrames.clear();
-	m_haveLastCheckpoint = false;
-	m_checkpointCount = 0;
-	m_lastCheckpointFrame = 0;
+	m_dead = false;
+	m_resetFrame = 0;
+	m_firstStep = true;
+	clearCheckpoints();
 	m_inLevel = true;
-	applyTimeScale();
+	applyAudioSpeed();
 	refreshLabel();
 }
 
 void ReplaySystem::onLevelExit() {
 	m_frame = 0;
-	m_checkpointFrames.clear();
-	m_haveLastCheckpoint = false;
-	m_checkpointCount = 0;
-	m_lastCheckpointFrame = 0;
+	m_dead = false;
+	clearCheckpoints();
 	m_inLevel = false;
 	stop();
 }
 
-void ReplaySystem::onCheckpoint(PlayLayer* pl) {
-	if (pl->m_checkpointArray && pl->m_checkpointArray->count() > 0) {
-		auto* obj = pl->m_checkpointArray->lastObject();
-		m_checkpointFrames[obj] = {m_frame, replay.actions().size()};
-		m_lastCheckpointFrame = m_frame;
-		m_lastCheckpointActions = replay.actions().size();
-		m_haveLastCheckpoint = true;
+void ReplaySystem::syncCheckpoints(PlayLayer* pl) {
+	const size_t count = pl->m_checkpointArray ? pl->m_checkpointArray->count() : 0;
+	if (count > m_checkpointStack.size()) {
+		const CheckpointSnap snap{m_frame, replay.actions().size()};
+		m_checkpointStack.resize(count, snap);
+		return;
+	}
+	if (count < m_checkpointStack.size()) {
+		m_checkpointStack.resize(count);
+		if (isRecording()) {
+			const size_t keep = m_checkpointStack.empty() ? 0 : m_checkpointStack.back().actions;
+			auto& acts = replay.actions();
+			if (keep < acts.size()) acts.resize(keep);
+			refreshLabel();
+		}
 	}
 }
 
-void ReplaySystem::onCheckpointRemoved(PlayLayer* pl) {
-	if (!isRecording()) return;
-	auto& acts = replay.actions();
-	size_t keep = 0;
-	if (pl->m_checkpointArray && pl->m_checkpointArray->count() > 0) {
-		auto it = m_checkpointFrames.find(pl->m_checkpointArray->lastObject());
-		if (it != m_checkpointFrames.end()) keep = it->second.actions;
-		else keep = m_haveLastCheckpoint ? m_lastCheckpointActions : acts.size();
-	}
-	if (keep < acts.size()) acts.resize(keep);
-	refreshLabel();
+void ReplaySystem::onCheckpoint(PlayLayer* pl) {
+	syncCheckpoints(pl);
 }
 
 void ReplaySystem::onAllCheckpointsRemoved() {
-	m_checkpointFrames.clear();
-	m_haveLastCheckpoint = false;
-	m_checkpointCount = 0;
-	m_lastCheckpointFrame = 0;
-	m_lastCheckpointActions = 0;
-}
-
-void ReplaySystem::trackCheckpoint(PlayLayer* pl) {
-	const size_t count = pl->m_checkpointArray ? pl->m_checkpointArray->count() : 0;
-	if (count < m_checkpointCount) {
-		m_checkpointCount = count;
-		onCheckpointRemoved(pl);
-		return;
-	}
-	m_checkpointCount = count;
-	if (count == 0) return;
-	auto* obj = pl->m_checkpointArray->lastObject();
-	if (m_checkpointFrames.try_emplace(obj, CheckpointSnap{m_frame, replay.actions().size()}).second) {
-		m_lastCheckpointFrame = m_frame;
-		m_lastCheckpointActions = replay.actions().size();
-		m_haveLastCheckpoint = true;
-	}
+	clearCheckpoints();
 }
 
 void ReplaySystem::onReset(PlayLayer* pl) {
 	m_inLevel = true;
-	applyTimeScale();
+	applyAudioSpeed();
+	syncCheckpoints(pl);
 
-	uint32_t checkpointFrame = 0;
-	if (pl->m_checkpointArray && pl->m_checkpointArray->count() > 0) {
-		auto it = m_checkpointFrames.find(pl->m_checkpointArray->lastObject());
-		if (it != m_checkpointFrames.end()) checkpointFrame = it->second.frame;
-		else if (m_haveLastCheckpoint) checkpointFrame = m_lastCheckpointFrame;
-	}
-	m_frame = checkpointFrame;
+	m_frame = m_checkpointStack.empty() ? 0 : m_checkpointStack.back().frame;
+	m_dead = false;
+	m_resetFrame = m_frame;
+	m_firstStep = true;
 	const float px = pl->m_player1->getPositionX();
 
 	if (isPlaying()) {
@@ -207,10 +204,18 @@ void ReplaySystem::onReset(PlayLayer* pl) {
 }
 
 void ReplaySystem::beforeStep(PlayLayer* pl) {
-	trackCheckpoint(pl);
+	syncCheckpoints(pl);
+	if (inputFixesEnabled && m_dead) return;
+	const bool first = m_firstStep;
+	m_firstStep = false;
 	if (!isPlaying() || !pl->m_player1) return;
 
 	auto& acts = replay.actions();
+	if (first && inputFixesEnabled && replay.type() == ReplayType::Frame) {
+		size_t i = 0;
+		while (i < acts.size() && acts[i].frame < m_frame) ++i;
+		m_actionIndex = i;
+	}
 	const float px = pl->m_player1->getPositionX();
 	while (m_actionIndex < acts.size()) {
 		const Action& a = acts[m_actionIndex];
@@ -287,6 +292,8 @@ void ReplaySystem::loadSettings() {
 	showStatus = mod->getSavedValue<bool>("show-status", true);
 	speed = mod->getSavedValue<float>("speed", 1.f);
 	speedhack = mod->getSavedValue<bool>("speedhack", false);
+	noclip = mod->getSavedValue<bool>("noclip", false);
+	inputFixesEnabled = mod->getSavedValue<bool>("input-fixes", true);
 }
 
 void ReplaySystem::saveSettings() {
@@ -295,6 +302,8 @@ void ReplaySystem::saveSettings() {
 	mod->setSavedValue<bool>("show-status", showStatus);
 	mod->setSavedValue<float>("speed", speed);
 	mod->setSavedValue<bool>("speedhack", speedhack);
+	mod->setSavedValue<bool>("noclip", noclip);
+	mod->setSavedValue<bool>("input-fixes", inputFixesEnabled);
 }
 
 

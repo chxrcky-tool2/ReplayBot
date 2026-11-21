@@ -1,6 +1,8 @@
 #include "menu.hpp"
 #include "replay_system.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 
 using namespace geode::prelude;
@@ -41,8 +43,8 @@ bool RBMenu::init() {
 	this->addChild(m_mainLayer);
 
 	auto bg = extension::CCScale9Sprite::create("GJ_square01.png", {0.f, 0.f, 80.f, 80.f});
-	bg->setContentSize({380.f, 280.f});
-	bg->setPosition({c.x, c.y - 15.f});
+	bg->setContentSize({380.f, 305.f});
+	bg->setPosition({c.x, c.y - 27.5f});
 	m_mainLayer->addChild(bg, -1);
 
 	m_buttonMenu = CCMenu::create();
@@ -114,17 +116,34 @@ bool RBMenu::init() {
 	m_buttonMenu->addChild(frameToggle);
 	label("Frame mode", {left + 30.f, top - 215.f}, 0.4f, {0.f, 0.5f});
 
+	auto clearBtn = CCMenuItemSpriteExtra::create(ButtonSprite::create("Clear", 50, true, "goldFont.fnt", "GJ_button_06.png", 30.f, 0.7f),
+		this, menu_selector(RBMenu::onClear));
+	clearBtn->setPosition({left + 300.f, top - 100.f});
+	m_buttonMenu->addChild(clearBtn);
+
+	auto noclipToggle = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(RBMenu::onNoclip), 0.55f);
+	noclipToggle->setPosition({left + 250.f, top - 215.f});
+	noclipToggle->toggle(rs.noclip);
+	m_buttonMenu->addChild(noclipToggle);
+	label("Noclip", {left + 268.f, top - 215.f}, 0.4f, {0.f, 0.5f});
+
 	auto statusToggle = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(RBMenu::onStatusText), 0.55f);
-	statusToggle->setPosition({left + 150.f, top - 215.f});
+	statusToggle->setPosition({left + 130.f, top - 215.f});
 	statusToggle->toggle(rs.showStatus);
 	m_buttonMenu->addChild(statusToggle);
-	label("Status text", {left + 168.f, top - 215.f}, 0.4f, {0.f, 0.5f});
+	label("Status text", {left + 148.f, top - 215.f}, 0.4f, {0.f, 0.5f});
 
 	auto speedToggle = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(RBMenu::onSpeedhack), 0.55f);
 	speedToggle->setPosition({left + 12.f, top - 245.f});
 	speedToggle->toggle(rs.speedhack);
 	m_buttonMenu->addChild(speedToggle);
 	label("Speedhack", {left + 30.f, top - 245.f}, 0.4f, {0.f, 0.5f});
+
+	auto inputFixToggle = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(RBMenu::onInputFixes), 0.55f);
+	inputFixToggle->setPosition({left + 12.f, top - 275.f});
+	inputFixToggle->toggle(rs.inputFixesEnabled);
+	m_buttonMenu->addChild(inputFixToggle);
+	label("Input fixes", {left + 30.f, top - 275.f}, 0.4f, {0.f, 0.5f});
 
 	label("Speed", {left + 150.f, top - 245.f}, 0.4f, {0.f, 0.5f});
 	m_speedInput = TextInput::create(50.f, "1", "bigFont.fnt");
@@ -219,24 +238,66 @@ void RBMenu::onSave(CCObject*) {
 	this->refresh();
 }
 
-void RBMenu::onLoad(CCObject*) {
-	const auto name = m_nameInput->getString();
-	auto doLoad = [this, name]() {
+void RBMenu::loadByName(std::string const& name) {
+	auto doLoad = [name]() {
 		const auto msg = ReplaySystem::get().loadReplay(name);
-		FLAlertLayer::create("ReplayBot", msg.empty() ? std::string("Replay loaded.") : msg, "OK")->show();
-		this->refresh();
+		if (msg.empty()) Notification::create("Replay loaded", NotificationIcon::Success)->show();
+		else FLAlertLayer::create("ReplayBot", msg, "OK")->show();
 	};
 	if (ReplaySystem::get().replay.actions().empty()) {
 		doLoad();
+		this->refresh();
 		return;
 	}
+	Ref<RBMenu> self = this;
 	createQuickPopup(
 		"Overwrite?",
 		"Loading will <cr>overwrite</c> the replay that is currently loaded.",
 		"Cancel", "Load",
-		[doLoad](FLAlertLayer*, bool btn2) {
-			if (btn2) doLoad();
+		[self, doLoad](FLAlertLayer*, bool btn2) {
+			if (!btn2) return;
+			doLoad();
+			self->refresh();
 		});
+}
+
+void RBMenu::onLoad(CCObject*) {
+	auto names = ReplaySystem::get().listReplays();
+	std::string typed = m_nameInput->getString();
+	std::transform(typed.begin(), typed.end(), typed.begin(), [](unsigned char ch) { return std::tolower(ch); });
+	if (!typed.empty()) {
+		std::erase_if(names, [&](std::string const& n) {
+			std::string low = n;
+			std::transform(low.begin(), low.end(), low.begin(), [](unsigned char ch) { return std::tolower(ch); });
+			return low.find(typed) == std::string::npos;
+		});
+	}
+	if (names.empty()) {
+		FLAlertLayer::create("ReplayBot", "No .replay macros found.", "OK")->show();
+		return;
+	}
+	Ref<RBMenu> self = this;
+	if (auto list = RBLoadMenu::create(std::move(names), [self](std::string const& name) {
+		self->m_nameInput->setString(name);
+		self->loadByName(name);
+	})) list->show();
+}
+
+void RBMenu::onClear(CCObject*) {
+	ReplaySystem::get().clearReplay();
+	this->refresh();
+}
+
+void RBMenu::onInputFixes(CCObject* sender) {
+	auto on = !static_cast<CCMenuItemToggler*>(sender)->isToggled();
+	ReplaySystem::get().inputFixesEnabled = on;
+	ReplaySystem::get().saveSettings();
+}
+
+void RBMenu::onNoclip(CCObject* sender) {
+	auto on = !static_cast<CCMenuItemToggler*>(sender)->isToggled();
+	ReplaySystem::get().noclip = on;
+	ReplaySystem::get().saveSettings();
 }
 
 void RBMenu::onFrameMode(CCObject* sender) {
@@ -264,4 +325,128 @@ void RBMenu::onPathInfo(CCObject*) {
 		"Replays are saved as <cy>name.replay</c> in:\n" + ReplaySystem::get().replayDir().string() +
 			"\n\nOld ReplayBot .replay files can be copied in there.",
 		"OK")->show();
+}
+
+RBLoadMenu* RBLoadMenu::create(std::vector<std::string> names, std::function<void(std::string const&)> onPick) {
+	auto ret = new RBLoadMenu();
+	if (ret && ret->init(std::move(names), std::move(onPick))) {
+		ret->autorelease();
+		return ret;
+	}
+	CC_SAFE_DELETE(ret);
+	return nullptr;
+}
+
+bool RBLoadMenu::init(std::vector<std::string> names, std::function<void(std::string const&)> onPick) {
+	if (!this->initWithColor({0, 0, 0, 105})) return false;
+
+	m_names = std::move(names);
+	m_onPick = std::move(onPick);
+
+	const auto win = CCDirector::sharedDirector()->getWinSize();
+	const CCPoint c = win / 2.f;
+
+	m_mainLayer = CCLayer::create();
+	this->addChild(m_mainLayer);
+
+	auto bg = extension::CCScale9Sprite::create("GJ_square01.png", {0.f, 0.f, 80.f, 80.f});
+	bg->setContentSize({300.f, 290.f});
+	bg->setPosition(c);
+	m_mainLayer->addChild(bg, -1);
+
+	m_buttonMenu = CCMenu::create();
+	m_buttonMenu->setPosition({0.f, 0.f});
+	m_mainLayer->addChild(m_buttonMenu);
+
+	this->registerWithTouchDispatcher();
+	forcePrio(CCTouchDispatcher::get(), this);
+
+	auto title = CCLabelBMFont::create("Load Replay", "bigFont.fnt");
+	title->setScale(0.7f);
+	title->setPosition({c.x, c.y + 125.f});
+	m_mainLayer->addChild(title);
+
+	auto closeSpr = CCSprite::createWithSpriteFrameName("GJ_closeBtn_001.png");
+	closeSpr->setScale(0.7f);
+	auto closeBtn = CCMenuItemSpriteExtra::create(closeSpr, this, menu_selector(RBLoadMenu::onClose));
+	closeBtn->setPosition({c.x - 150.f + 4.f, c.y + 145.f - 4.f});
+	m_buttonMenu->addChild(closeBtn);
+
+	m_listMenu = CCMenu::create();
+	m_listMenu->setPosition({0.f, 0.f});
+	m_mainLayer->addChild(m_listMenu);
+
+	auto prevSpr = CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png");
+	prevSpr->setScale(0.6f);
+	auto prevBtn = CCMenuItemSpriteExtra::create(prevSpr, this, menu_selector(RBLoadMenu::onPrev));
+	prevBtn->setPosition({c.x - 90.f, c.y - 125.f});
+	m_buttonMenu->addChild(prevBtn);
+
+	auto nextSpr = CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png");
+	nextSpr->setScale(0.6f);
+	nextSpr->setFlipX(true);
+	auto nextBtn = CCMenuItemSpriteExtra::create(nextSpr, this, menu_selector(RBLoadMenu::onNext));
+	nextBtn->setPosition({c.x + 90.f, c.y - 125.f});
+	m_buttonMenu->addChild(nextBtn);
+
+	m_pageLabel = CCLabelBMFont::create("", "chatFont.fnt");
+	m_pageLabel->setScale(0.6f);
+	m_pageLabel->setPosition({c.x, c.y - 125.f});
+	m_mainLayer->addChild(m_pageLabel);
+
+	this->setKeypadEnabled(true);
+	this->setTouchEnabled(true);
+
+	this->rebuild();
+	return true;
+}
+
+void RBLoadMenu::rebuild() {
+	constexpr size_t perPage = 6;
+	const auto win = CCDirector::sharedDirector()->getWinSize();
+	const CCPoint c = win / 2.f;
+
+	m_listMenu->removeAllChildren();
+
+	const size_t pages = std::max<size_t>(1, (m_names.size() + perPage - 1) / perPage);
+	if (m_page >= pages) m_page = pages - 1;
+
+	const size_t first = m_page * perPage;
+	for (size_t i = 0; i < perPage && first + i < m_names.size(); ++i) {
+		const size_t index = first + i;
+		auto spr = ButtonSprite::create(m_names[index].c_str(), 220, true, "goldFont.fnt", "GJ_button_01.png", 30.f, 0.7f);
+		auto btn = CCMenuItemSpriteExtra::create(spr, this, menu_selector(RBLoadMenu::onPick));
+		btn->setTag(static_cast<int>(index));
+		btn->setPosition({c.x, c.y + 80.f - 38.f * static_cast<float>(i)});
+		m_listMenu->addChild(btn);
+	}
+
+	m_pageLabel->setString(fmt::format("{}/{}", m_page + 1, pages).c_str());
+}
+
+void RBLoadMenu::keyBackClicked() {
+	FLAlertLayer::keyBackClicked();
+}
+
+void RBLoadMenu::onClose(CCObject*) {
+	this->keyBackClicked();
+}
+
+void RBLoadMenu::onPick(CCObject* sender) {
+	const size_t index = static_cast<size_t>(static_cast<CCNode*>(sender)->getTag());
+	if (index >= m_names.size()) return;
+	const std::string name = m_names[index];
+	auto cb = m_onPick;
+	this->keyBackClicked();
+	if (cb) cb(name);
+}
+
+void RBLoadMenu::onPrev(CCObject*) {
+	if (m_page > 0) --m_page;
+	this->rebuild();
+}
+
+void RBLoadMenu::onNext(CCObject*) {
+	++m_page;
+	this->rebuild();
 }

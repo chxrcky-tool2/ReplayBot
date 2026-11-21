@@ -14,21 +14,20 @@ class ReplaySystem {
 	uint32_t m_frame = 0;
 	size_t m_actionIndex = 0;
 	bool m_restartOnResume = false;
-	bool m_scaleApplied = false;
 	bool m_inLevel = false;
-	uint32_t m_lastCheckpointFrame = 0;
-	bool m_haveLastCheckpoint = false;
-	float m_prevTimeScale = 1.f;
+	uint32_t m_audioTick = 0;
+	bool m_dead = false;
+	bool m_firstStep = false;
+	uint32_t m_resetFrame = 0;
 	struct CheckpointSnap { uint32_t frame = 0; size_t actions = 0; };
-	std::unordered_map<cocos2d::CCObject*, CheckpointSnap> m_checkpointFrames;
-	size_t m_lastCheckpointActions = 0;
-	size_t m_checkpointCount = 0;
+	std::vector<CheckpointSnap> m_checkpointStack;
 
 	ReplaySystem() = default;
 
 	void setState(RBState state);
-	void applyTimeScale();
-	void trackCheckpoint(PlayLayer* pl);
+	void applyAudioSpeed();
+	void syncCheckpoints(PlayLayer* pl);
+	void clearCheckpoints();
 	bool lastHeld(bool player2) const;
 	void addAction(PlayLayer* pl, bool hold, bool player2);
 
@@ -47,7 +46,15 @@ public:
 	float speed = 1.f;
 	bool speedhack = false;
 	bool injecting = false;
+	bool noclip = false;
+	bool inputFixesEnabled = true;
 
+	float effectiveSpeed() const;
+	void tickAudio();
+	bool blocksInput(bool down) const;
+	void onDeath() { m_dead = true; }
+	bool isDead() const { return m_dead; }
+	void clearReplay();
 	bool isRecording() const { return m_state == RBState::Recording; }
 	bool isPlaying() const { return m_state == RBState::Playing; }
 	uint32_t frame() const { return m_frame; }
@@ -65,7 +72,6 @@ public:
 	void onLevelExit();
 	void onReset(PlayLayer* pl);
 	void onCheckpoint(PlayLayer* pl);
-	void onCheckpointRemoved(PlayLayer* pl);
 	void onAllCheckpointsRemoved();
 	void beforeStep(PlayLayer* pl);
 	void afterStep() { ++m_frame; }

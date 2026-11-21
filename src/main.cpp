@@ -18,9 +18,19 @@ static bool isThePlayLayer(GJBaseGameLayer* layer) {
 }
 
 class $modify(RBBaseGameLayer, GJBaseGameLayer) {
+	void update(float dt) {
+		if (isThePlayLayer(this)) {
+			auto& rs = ReplaySystem::get();
+			const float sp = rs.effectiveSpeed();
+			if (sp != 1.f) dt *= sp;
+			rs.tickAudio();
+		}
+		GJBaseGameLayer::update(dt);
+	}
+
 	void processCommands(float dt, bool isHalfTick, bool isLastTick) {
 		auto pl = PlayLayer::get();
-		if (!isThePlayLayer(this)) {
+		if (isHalfTick || !isThePlayLayer(this)) {
 			GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
 			return;
 		}
@@ -34,7 +44,7 @@ class $modify(RBBaseGameLayer, GJBaseGameLayer) {
 		if (button == 1 && isThePlayLayer(this)) {
 			auto& rs = ReplaySystem::get();
 			if (!rs.injecting) {
-				if (rs.isPlaying()) return;
+				if (rs.blocksInput(down)) return;
 				rs.onButton(PlayLayer::get(), down, isPlayer1);
 			}
 		}
@@ -53,9 +63,16 @@ class $modify(RBPlayLayer, PlayLayer) {
 		ReplaySystem::get().onReset(this);
 	}
 
-	void createCheckpoint() {
-		PlayLayer::createCheckpoint();
+	CheckpointObject* createCheckpoint() {
+		auto cp = PlayLayer::createCheckpoint();
 		ReplaySystem::get().onCheckpoint(this);
+		return cp;
+	}
+
+	void destroyPlayer(PlayerObject* player, GameObject* object) {
+		if (ReplaySystem::get().noclip && object != m_anticheatSpike) return;
+		PlayLayer::destroyPlayer(player, object);
+		if (player && player->m_isDead) ReplaySystem::get().onDeath();
 	}
 
 	void removeAllCheckpoints() {
